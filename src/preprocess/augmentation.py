@@ -50,7 +50,7 @@ class ObjectDetectionAugmentation:
         transformed_bboxes = transformed['bboxes']
         return transformed_img, transformed_bboxes
     
-    # Todo: Eliminate loop
+    # Todo: Delete loop
     def transform_data(self, img_list: list, bboxes_list: list):
         '''Transform all data'''
         transformed_img_list = []
