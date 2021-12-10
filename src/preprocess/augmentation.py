@@ -18,13 +18,21 @@ class ObjectDetectionAugmentation:
             }
         '''
         self.config = config
+        # add other augmentations, if you want
+        aug_list = []
+        for key in config:
+            if key == 'random_crop':
+                aug = A.RandomCrop(**config[key])
+            elif key == 'horizontal_flip':
+                aug = A.HorizontalFlip(**config[key])
+            elif key == 'vertical_flip':
+                aug = A.VerticalFlip(**config[key])
+            elif key =='random_brightness_contrast':
+                aug = A.RandomBrightnessContrast(**config[key])
+            aug_list.append(aug)
+            
         self.transformer = A.Compose(
-            [
-                A.RandomCrop(**config['random_crop']),
-                A.HorizontalFlip(**config['horizontal_flip']),
-                A.VerticalFlip(**config['vertical_flip']),
-                A.RandomBrightnessContrast(**config['random_brightness_contrast']),
-            ],
+            aug_list,
             bbox_params=A.BboxParams(**config['bbox_param'])
         )
     

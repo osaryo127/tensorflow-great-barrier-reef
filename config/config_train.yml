@@ -1,7 +1,6 @@
 # train yaml
     
 transforms_args:
-    rotation: {p: 0.5}
     vertical_flip: {p: 0.5}
     horizontal_flip: {p: 0.5}
     random_crop: {width: 450, height: 450}
