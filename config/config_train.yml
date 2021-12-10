@@ -1,0 +1,9 @@
+# train yaml
+    
+transforms_args:
+    rotation: {p: 0.5}
+    vertical_flip: {p: 0.5}
+    horizontal_flip: {p: 0.5}
+    random_crop: {width: 450, height: 450}
+    random_brightness_contrast: {p: 0.2}
+    bbox_param: {format: 'coco', min_area: 100, min_visibility: 0.1, label_fields: []}
