@@ -18,7 +18,6 @@ class ObjectDetectionAugmentation:
                 compile: 'Compose'
             }
         '''
-        self.config = config
         # add other augmentations, if you want
         aug_list = []
         for key in config['augment_args']:
@@ -36,23 +35,39 @@ class ObjectDetectionAugmentation:
             compile_augs = A.Compose
         elif config['compile'] == 'oneof':
             compile_augs = A.OneOf
-        
+            
         self.transformer = compile_augs(
             aug_list,
             bbox_params=A.BboxParams(**config['bbox_param'])
         )
-    
+        self.config = config
+        
     
     def transform(self, img: np.array, bboxes: list):
-        '''Transform set of image and bboxes'''
+        '''Transform set of image and bboxes
+        Args:
+            img(np.array): input image
+            bboxes(list): list of bounding boxes
+        Return:
+            transformed_img(np.array): output image
+            transformed_bboxes(list): list of bounding boxes
+        '''
         transformed = self.transformer(image=img, bboxes=bboxes)
         transformed_img = transformed['image']
         transformed_bboxes = transformed['bboxes']
         return transformed_img, transformed_bboxes
     
+    
     # Todo: Delete loop
     def transform_data(self, img_list: list, bboxes_list: list):
-        '''Transform all data'''
+        '''Transform all data
+       Args:
+            img_list(list[np.array]): list of input images
+            bboxes_list(list[list]): list of bounding boxes list
+        Return:
+            transformed_img_list(list[np.array]): list ofoutput image
+            transformed_bboxes_list(list[list]): list of bounding boxes list
+        '''
         transformed_img_list = []
         transformed_bboxes_list = []
         for _img, _bboxes in zip(img_list, bboxes_list):
