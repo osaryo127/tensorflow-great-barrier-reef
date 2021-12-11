@@ -6,6 +6,9 @@
 *.feather
 # features/importances/*.png
 
+# image data
+*/train_images/*
+
 # Created by https://www.gitignore.io/api/macos,python,jupyternotebook
 # Edit at https://www.gitignore.io/?templates=macos,python,jupyternotebook
 
