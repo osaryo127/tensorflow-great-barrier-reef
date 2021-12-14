@@ -4,6 +4,9 @@
 *.tsv
 *.zip
 *.feather
+*.txt
+*.npy
+
 # features/importances/*.png
 
 # image data
@@ -53,6 +56,7 @@ Temporary Items
 __pycache__/
 *.py[cod]
 *$py.class
+*.cache
 
 # C extensions
 *.so
