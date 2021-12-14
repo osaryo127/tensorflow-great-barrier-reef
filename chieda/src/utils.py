@@ -1,21 +1,24 @@
 import os.path as osp
-import shutil
 from pathlib import Path
-from tqdm import tqdm
+import ast
+import random
 import numpy as np
-from albumentations.augmentations import transforms
+import pandas as pd
+import imagesize
+from tqdm import tqdm
+
 from sklearn import model_selection
-import torch
+import cv2
 import albumentations as A
+import torch
 
 import dataset as ds
-from run import ROOT_PATH
-from yolov5.cots_data import OUTPUT_PATH
 
 ROOT = Path("../")
 
 
-def add_fold(df):
+def add_fold(df: pd.DataFrame, show_fold_info: bool = False) -> pd.DataFrame:
+    """train.csvに交差検証用のFOLDを付与する"""
     # アノテーション数
     df["annotations"] = df["annotations"].apply(ast.literal_eval)
     df["n_annotations"] = df["annotations"].str.len()
@@ -47,7 +50,8 @@ def add_fold(df):
     for fold_id, (_, val_idx) in enumerate(kf.split(df_split["subsequence_id"], y=df_split["has_annotations"])):
         subseq_val_idx = df_split["subsequence_id"].iloc[val_idx]
         df.loc[df["subsequence_id"].isin(subseq_val_idx), "fold"] = fold_id
-        print(f"fold {fold_id} : {subseq_val_idx.values}")
+        if show_fold_info:
+            print(f"fold {fold_id} : {subseq_val_idx.values}")
 
     df["fold"] = df["fold"].astype(int)
     # [TODO] write how subsequence is assigned to folds
@@ -55,7 +59,9 @@ def add_fold(df):
     return df
 
 
-def process_data(data, data_type="train"):
+def label2txtfile(data, data_type="train"):
+    """train.csvから、
+    """
     for _, row in tqdm(data.iterrows(), total=len(data)):
         image_name = row["image_id"]
         annos = row["annotations"]
@@ -70,32 +76,41 @@ def process_data(data, data_type="train"):
             data_.append([0, x_center, y_center, w, h])
         data_ = np.array(data_)
         np.savetxt(
-            osp.join(ROOT_PATH, f"labels/{data_type}/{image_name}.txt"), data_, fmt=["%d", "%f", "%f", "%f", "%f"],
+            osp.join(ROOT, f"labels/{data_type}/{image_name}.txt"), data_, fmt=["%d", "%f", "%f", "%f", "%f"],
         )
+
+
+def od_collate_fn(batch):
+    """
+    Datasetから取り出すアノテーションデータのサイズが画像ごとに異なります。
+    画像内の物体数が2個であれば(2, 5)というサイズですが、3個であれば（3, 5）など変化します。
+    この変化に対応したDataLoaderを作成するために、
+    カスタイマイズした、collate_fnを作成します。
+    collate_fnは、PyTorchでリストからmini-batchを作成する関数です。
+    ミニバッチ分の画像が並んでいるリスト変数batchに、
+    ミニバッチ番号を指定する次元を先頭に1つ追加して、リストの形を変形します。
+    """
+
+    targets = []
+    imgs = []
+    for sample in batch:
+        imgs.append(sample[0])  # sample[0] は画像imgです
+        targets.append(torch.FloatTensor(sample[1]))  # sample[1] はアノテーションgtです
+
+    # imgsはミニバッチサイズのリストになっています
+    # リストの要素はtorch.Size([3, 300, 300])です。
+    # このリストをtorch.Size([batch_num, 3, 300, 300])のテンソルに変換します
+    imgs = torch.stack(imgs, dim=0)
+
+    # targetsはアノテーションデータの正解であるgtのリストです。
+    # リストのサイズはミニバッチサイズです。
+    # リストtargetsの要素は [n, 5] となっています。
+    # nは画像ごとに異なり、画像内にある物体の数となります。
+    # 5は [xmin, ymin, xmax, ymax, class_index] です
+
+    return imgs, targets
 
 
 def get_augmentation(opt):
     train_transform = []
     return A.OneOf(train_transform)
-
-
-def get_dataloader(opt):
-    classes = ["cots"]
-    color_mean = (104, 117, 123)  # BGR
-    img_tr, anno_tr, img_va, anno_va = ds.make_datapath(ROOT)
-
-    imgsz = 720
-    dataset_tr = ds.CotsDataset(
-        img_tr,
-        anno_tr,
-        phase="train",
-        transform=ds.CotsTransform(imgsz, color_mean),
-        transform_anno=ds.AnnoList(classes),
-    )
-    dataset_va = ds.CotsDataset(
-        img_va, anno_va, phase="val", transform=ds.CotsTransform(imgsz, color_mean), transform_anno=ds.AnnoList(classes)
-    )
-    batch_size = opt.batchsize
-    dataloader_tr = torch.utils.DataLoader(dataset_tr, batch_size=batch_size, suffle=True, collate_fn=anno_collater)
-    dataloader_va = torch.utils.DataLoader(dataset_va, batch_size=batch_size, suffle=False, collate_fn=anno_collater)
-    return dataloader_tr, dataloader_va

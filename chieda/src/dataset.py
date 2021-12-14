@@ -10,97 +10,144 @@ import torch.utils.data as data
 import cv2
 import albumentations as A
 
+# utility
+from typing import List
+import os.path as osp
+from pathlib import Path
+
 # metadata handling
+import ast
 import numpy as np
 import pandas as pd
-import os.path as osp
-import ast
 from sklearn import model_selection
 from itertools import product as product
 from math import sqrt as sqrt
 
 from match import match
 
+# ROOT_PATH = "/kaggle/input/tensorflow-great-barrier-reef/"
+ROOT_PATH = Path("../")
 
-# 学習、検証の画像データとアノテーションデータへのファイルパスリストを作成する
-def make_datapath(rootpath, fold):
-    # train.csvからCV
-    df = pd.read_csv(osp.join(rootpath, "train.csv"))
+
+def make_datapath(df: pd.DataFrame, fold: int):
+    """
+    DataFrameから画像データへのファイルパスリストを作成する。\n
+    DataFrameには訓練・検証の分割のためにfoldカラムが必要。
+    """
+    # train.csvのfoldカラムからimage_idを取り出す
     train_id_names = df[df.fold != fold].reset_index(drop=True)["image_id"]
     val_id_names = df[df.fold == fold].reset_index(drop=True)["image_id"]
 
     # 画像ファイルとアノテーションファイルへのパスのテンプレートを作成
-    imgpath_template = osp.join(rootpath, "train_image", "%s.jpg")
-    annopath_template = osp.join(rootpath, "labels", "%s.txt")
+    imgpath_template = osp.join(ROOT_PATH, "train_images", "video_%s", "%s.jpg")
+    # annopath_template = osp.join(ROOT_PATH, "labels", "%s.txt")
 
     # 訓練データの画像ファイルとアノテーションファイルへのパスリストを作成
     train_img_list = list()
-    train_anno_list = list()
-
+    # train_anno_list = list()
     for fname in train_id_names:
-        img_path = imgpath_template % fname
-        anno_path = annopath_template % fname
+        # train.csvのimage_idの{動画No.}-{フレームNo.}形式を
+        # ファイルパスのvideo_{動画No.}/{フレームNo.}.jpg形式に変換
+        img_path = imgpath_template % (fname[0], fname[2:])
+        # anno_path = annopath_template % fname
         train_img_list.append(img_path)
-        train_anno_list.append(anno_path)
+        # train_anno_list.append(anno_path)
 
     # 検証データの画像ファイルとアノテーションファイルへのパスリストを作成
     val_img_list = list()
-    val_anno_list = list()
+    # val_anno_list = list()
+    for fname in val_id_names:
+        # train.csvのimage_idの{動画No.}-{フレームNo.}形式を
+        # ファイルパスのvideo_{動画No.}/{フレームNo.}.jpg形式に変換
+        img_path = imgpath_template % (fname[0], fname[2:])
+        # anno_path = annopath_template % fname
+        val_img_list.append(img_path)
+        # val_anno_list.append(anno_path)
 
-    for line in open(val_id_names):
-        file_id = line.strip()  # 空白スペースと改行を除去
-        img_path = imgpath_template % file_id  # 画像のパス
-        anno_path = annopath_template % file_id  # アノテーションのパス
-        val_img_list.append(img_path)  # リストに追加
-        val_anno_list.append(anno_path)  # リストに追加
-
-    return train_img_list, train_anno_list, val_img_list, val_anno_list
+    # return train_img_list, train_anno_list, val_img_list, val_anno_list
+    return train_img_list, val_img_list
 
 
-class AnnoList(object):
+def split_labels(df: pd.DataFrame, fold: int):
+    """ラベルを辞書型に変換した上で、訓練・検証に分割する。"""
+    anno_tr = df[df.fold != fold].reset_index(drop=True)["annotations"]
+    anno_va = df[df.fold == fold].reset_index(drop=True)["annotations"]
+    return anno_tr, anno_va
+
+
+class AnnoDict2List(object):
     """
-    1枚の画像に対する「XML形式のアノテーションデータ」を、画像サイズで規格化してからリスト形式に変換する。
+    1枚の画像に対するアノテーションデータ（辞書型）を、画像サイズで規格化してからリスト形式に変換する。
     Attributes
     ----------
-    classes : リスト
-        VOCのクラス名を格納したリスト
+    classes : List
+        クラス名を格納したリスト
+    fmt : str
+        "minmax" : [   x_min,    y_min, x_max,  y_max, class]
+        "minsize": [   x_min,    y_min, width, height, class]
+        "center" : [x_center, y_center, width, height, class]
     """
 
-    def __init__(self, classes):
-
+    def __init__(self, classes, fmt="minmax"):
         self.classes = classes
+        self.fmt = fmt
 
-    def __call__(self, path, width, height):
+    def __call__(self, annos, width, height):
         """
-        1枚の画像に対する「XML形式のアノテーションデータ」を、画像サイズで規格化してからリスト形式に変換する。
+        1枚の画像に対するアノテーションデータを、画像サイズで規格化してからリスト形式に変換する。
         Parameters
         ----------
-        path : str
-            ファイルへのパス。
-        width : int
-            対象画像の幅。
-        height : int
-            対象画像の高さ。
+        annos  : list(dict) アノテーション。
+        width  : int 対象画像の幅。
+        height : int 対象画像の高さ。
         Returns
         -------
         ret : [[xmin, ymin, xmax, ymax, label_ind], ... ]
             物体のアノテーションデータを格納したリスト。画像内に存在する物体数分のだけ要素を持つ。
         """
-
         # 画像内の全ての物体のアノテーションをこのリストに格納します
-        ret = []
+        ret = list()
+        # 画像内にある物体（object）の数だけループする
+        for obj in annos:
+            x_min, x_max, width, height = obj["x"], obj["y"], obj["width"], obj["height"]
+            ret += [[x_min, x_max, width, height, 0]]
+        if len(annos) == 0:
+            ret += [[]]
 
-        # ファイルを読み込む
-        with open("../labels\\0-35.txt") as f:
-            ret = list()
-            # 画像内にある物体（object）の数だけループする
-            for obj in f.readlines():
-                bbox = obj.split()
-                x_min, x_max, width, height = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
+        return np.array(ret)  # [[xmin, ymin, xmax, ymax, label_idx], ... ]
 
-                ret += [x_min, x_max, width, height]
 
-        return np.array(ret)  # [[xmin, ymin, xmax, ymax, label_ind], ... ]
+def get_dataset(df: pd.DataFrame, fold: int, opt):
+    """FOLDが付与されたデータフレームから、指定したFOLDで分割されたデータセットを取得する。"""
+    classes = ["cots"]
+    color_mean = (104, 117, 123)  # BGR
+    # img_tr, anno_tr, img_va, anno_va = make_datapath(df, 0)
+    img_tr, img_va = make_datapath(df, 0)
+    anno_tr, anno_va = split_labels(df, 0)
+    imgsz = 720
+    dataset_tr = CotsDataset(
+        img_tr,
+        anno_tr,
+        phase="train",
+        transform=CotsTransform(imgsz, color_mean),
+        transform_anno=AnnoDict2List(classes),
+    )
+    dataset_va = CotsDataset(
+        img_va, anno_va, phase="val", transform=CotsTransform(imgsz, color_mean), transform_anno=AnnoDict2List(classes),
+    )
+    return dataset_tr, dataset_va
+
+
+def get_dataloader(dataset_tr: torch.utils.data.Dataset, dataset_va: torch.utils.data.Dataset, opt):
+    """データセットからデータローダーを取得する。"""
+    batch_size = opt["batchsize"]
+    dataloader_tr = torch.utils.data.DataLoader(
+        dataset_tr, batch_size=batch_size, shuffle=True, collate_fn=od_collate_fn
+    )
+    dataloader_va = torch.utils.data.DataLoader(
+        dataset_va, batch_size=batch_size, shuffle=False, collate_fn=od_collate_fn
+    )
+    return dataloader_tr, dataloader_va
 
 
 # 入力画像の前処理をするクラス
@@ -112,7 +159,6 @@ class CotsTransform:
     画像のサイズを300x300にする。
     学習時はデータオーギュメンテーションする。
 
-
     Attributes
     ----------
     input_size : int
@@ -123,24 +169,24 @@ class CotsTransform:
 
     def __init__(self, input_size, color_mean):
         self.data_transform = {
-            "train": Compose(
+            "train": A.Compose(
                 [
-                    A.ConvertFromInts(),  # intをfloat32に変換
-                    A.ToAbsoluteCoords(),  # アノテーションデータの規格化を戻す
-                    A.PhotometricDistort(),  # 画像の色調などをランダムに変化
-                    A.Expand(color_mean),  # 画像のキャンバスを広げる
-                    A.RandomSampleCrop(),  # 画像内の部分をランダムに抜き出す
-                    A.RandomMirror(),  # 画像を反転させる
-                    A.ToPercentCoords(),  # アノテーションデータを0-1に規格化
-                    A.Resize(input_size),  # 画像サイズをinput_size×input_sizeに変形
-                    A.SubtractMeans(color_mean),  # BGRの色の平均値を引き算
+                    # A.ConvertFromInts(),  # intをfloat32に変換
+                    # A.ToAbsoluteCoords(),  # アノテーションデータの規格化を戻す
+                    # A.PhotometricDistort(),  # 画像の色調などをランダムに変化
+                    # A.Expand(color_mean),  # 画像のキャンバスを広げる
+                    # A.RandomSampleCrop(),  # 画像内の部分をランダムに抜き出す
+                    # A.RandomMirror(),  # 画像を反転させる
+                    # A.ToPercentCoords(),  # アノテーションデータを0-1に規格化
+                    A.Resize(input_size, input_size),  # 画像サイズをinput_size×input_sizeに変形
+                    # A.SubtractMeans(color_mean),  # BGRの色の平均値を引き算
                 ]
             ),
-            "val": Compose(
+            "val": A.Compose(
                 [
-                    A.ConvertFromInts(),  # intをfloatに変換
-                    A.Resize(input_size),  # 画像サイズをinput_size×input_sizeに変形
-                    A.SubtractMeans(color_mean),  # BGRの色の平均値を引き算
+                    # A.ConvertFromInts(),  # intをfloatに変換
+                    A.Resize(input_size, input_size),  # 画像サイズをinput_size×input_sizeに変形
+                    # A.SubtractMeans(color_mean),  # BGRの色の平均値を引き算
                 ]
             ),
         }
@@ -178,7 +224,7 @@ class CotsDataset(data.Dataset):
         self.anno_list = anno_list
         self.phase = phase  # train もしくは valを指定
         self.transform = transform  # 画像の変形
-        self.transform_anno = transform_anno  # アノテーションデータをxmlからリストへ
+        self.transform_anno = transform_anno  # アノテーションデータを辞書からリストへ
 
     def __len__(self):
         """画像の枚数を返す"""
@@ -199,9 +245,9 @@ class CotsDataset(data.Dataset):
         img = cv2.imread(image_file_path)  # [高さ][幅][色BGR]
         height, width, channels = img.shape  # 画像のサイズを取得
 
-        # 2. xml形式のアノテーション情報をリストに
-        anno_file_path = self.anno_list[index]
-        anno_list = self.transform_anno(anno_file_path, width, height)
+        # 2. アノテーション情報をリストに
+        annos = self.anno_list[index]
+        anno_list = self.transform_anno(annos, width, height)
 
         # 3. 前処理を実施
         img, boxes, labels = self.transform(img, self.phase, anno_list[:, :4], anno_list[:, 4])
@@ -761,7 +807,9 @@ class MultiBoxLoss(nn.Module):
         Parameters
         ----------
         predictions : SSD netの訓練時の出力(tuple)
-            (loc=torch.Size([num_batch, 8732, 4]), conf=torch.Size([num_batch, 8732, 21]), dbox_list=torch.Size [8732,4])。
+            (loc=torch.Size([num_batch, 8732, 4]),
+             conf=torch.Size([num_batch, 8732, 21]),
+             dbox_list=torch.Size [8732,4])。
 
         targets : [num_batch, num_objs, 5]
             5は正解のアノテーション情報[xmin, ymin, xmax, ymax, label_ind]を示す
