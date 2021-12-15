@@ -111,9 +111,6 @@ class AnnoDict2List(object):
         for obj in annos:
             x_min, x_max, width, height = obj["x"], obj["y"], obj["width"], obj["height"]
             ret += [[x_min, x_max, width, height, 0]]
-        if len(annos) == 0:
-            ret += [[]]
-
         return np.array(ret)  # [[xmin, ymin, xmax, ymax, label_idx], ... ]
 
 
@@ -171,6 +168,9 @@ class CotsTransform:
         self.data_transform = {
             "train": A.Compose(
                 [
+                    A.RandomCrop(width=450, height=450),
+                    A.HorizontalFlip(p=0.5),
+                    A.RandomBrightnessContrast(p=0.2),
                     # A.ConvertFromInts(),  # intをfloat32に変換
                     # A.ToAbsoluteCoords(),  # アノテーションデータの規格化を戻す
                     # A.PhotometricDistort(),  # 画像の色調などをランダムに変化
@@ -178,9 +178,10 @@ class CotsTransform:
                     # A.RandomSampleCrop(),  # 画像内の部分をランダムに抜き出す
                     # A.RandomMirror(),  # 画像を反転させる
                     # A.ToPercentCoords(),  # アノテーションデータを0-1に規格化
-                    A.Resize(input_size, input_size),  # 画像サイズをinput_size×input_sizeに変形
+                    # A.Resize(input_size, input_size),  # 画像サイズをinput_size×input_sizeに変形
                     # A.SubtractMeans(color_mean),  # BGRの色の平均値を引き算
-                ]
+                ],
+                bbox_params=A.BboxParams(format="coco", min_area=100, min_visibility=0.1, label_fields=[]),
             ),
             "val": A.Compose(
                 [
@@ -198,7 +199,7 @@ class CotsTransform:
         phase : 'train' or 'val'
             前処理のモードを指定。
         """
-        return self.data_transform[phase](img, boxes, labels)
+        return self.data_transform[phase](image=img, bboxes=boxes, class_labels=labels)
 
 
 class CotsDataset(data.Dataset):
@@ -250,6 +251,7 @@ class CotsDataset(data.Dataset):
         anno_list = self.transform_anno(annos, width, height)
 
         # 3. 前処理を実施
+        print(type(anno_list), anno_list.shape, anno_list)
         img, boxes, labels = self.transform(img, self.phase, anno_list[:, :4], anno_list[:, 4])
 
         # 色チャネルの順番がBGRになっているので、RGBに順番変更
