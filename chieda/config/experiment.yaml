@@ -1,6 +1,0 @@
-weight: yolov5s.pt
-data: coco128.yaml
-hyp: hp-yolov5s.yaml
-epochs: 300
-batchsize: 16
-patience: 100  
