@@ -17,7 +17,7 @@ import dataset as ds
 ROOT = Path("../")
 
 
-def add_fold(df: pd.DataFrame, show_fold_info: bool = False) -> pd.DataFrame:
+def add_fold(df: pd.DataFrame, n_folds: int = 5, seed: int = 42, show_fold_info: bool = False) -> pd.DataFrame:
     """train.csvに交差検証用のFOLDを付与する"""
     # アノテーション数
     df["annotations"] = df["annotations"].apply(ast.literal_eval)
@@ -45,8 +45,7 @@ def add_fold(df: pd.DataFrame, show_fold_info: bool = False) -> pd.DataFrame:
     df_split = (
         df.groupby("subsequence_id").agg({"has_annotations": "max", "video_frame": "count"}).astype(int).reset_index()
     )
-    n_splits = 5
-    kf = model_selection.StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=0)
+    kf = model_selection.StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=seed)
     for fold_id, (_, val_idx) in enumerate(kf.split(df_split["subsequence_id"], y=df_split["has_annotations"])):
         subseq_val_idx = df_split["subsequence_id"].iloc[val_idx]
         df.loc[df["subsequence_id"].isin(subseq_val_idx), "fold"] = fold_id
@@ -54,7 +53,6 @@ def add_fold(df: pd.DataFrame, show_fold_info: bool = False) -> pd.DataFrame:
             print(f"fold {fold_id} : {subseq_val_idx.values}")
 
     df["fold"] = df["fold"].astype(int)
-    # [TODO] write how subsequence is assigned to folds
 
     return df
 
