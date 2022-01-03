@@ -17,7 +17,7 @@ import dataset as ds
 ROOT = Path("../")
 
 
-def add_fold(df: pd.DataFrame, n_folds: int = 5, seed: int = 42, show_fold_info: bool = False) -> pd.DataFrame:
+def add_fold(df: pd.DataFrame, n_folds: int = 5, seed: int = 42, only_positive: bool = True, show_fold_info: bool = False) -> pd.DataFrame:
     """train.csvに交差検証用のFOLDを付与する"""
     # アノテーション数
     df["annotations"] = df["annotations"].apply(ast.literal_eval)
@@ -42,15 +42,22 @@ def add_fold(df: pd.DataFrame, n_folds: int = 5, seed: int = 42, show_fold_info:
     df = df.drop(drop_cols, axis=1)
 
     # 物体の有無による階層化を用いたsubsequenceのfold振り分け
-    df_split = (
-        df.groupby("subsequence_id").agg({"has_annotations": "max", "video_frame": "count"}).astype(int).reset_index()
-    )
-    kf = model_selection.StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=seed)
-    for fold_id, (_, val_idx) in enumerate(kf.split(df_split["subsequence_id"], y=df_split["has_annotations"])):
-        subseq_val_idx = df_split["subsequence_id"].iloc[val_idx]
-        df.loc[df["subsequence_id"].isin(subseq_val_idx), "fold"] = fold_id
-        if show_fold_info:
-            print(f"fold {fold_id} : {subseq_val_idx.values}")
+    df_split = (df.groupby("subsequence_id").agg({"has_annotations": "max", "video_frame": "count"}).astype(int).reset_index())
+    if only_positive:
+        df = df[df.has_annotations].reset_index(drop=True)
+        kf = model_selection.KFold(n_splits=n_folds, shuffle=True, random_state=seed)
+        for fold_id, (_, val_idx) in enumerate(kf.split(df_split["subsequence_id"])):
+            subseq_val_idx = df_split["subsequence_id"].iloc[val_idx]
+            df.loc[df["subsequence_id"].isin(subseq_val_idx), "fold"] = fold_id
+            if show_fold_info:
+                print(f"fold {fold_id} : {subseq_val_idx.values}")
+    else:
+        kf = model_selection.StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=seed)
+        for fold_id, (_, val_idx) in enumerate(kf.split(df_split["subsequence_id"], y=df_split["has_annotations"])):
+            subseq_val_idx = df_split["subsequence_id"].iloc[val_idx]
+            df.loc[df["subsequence_id"].isin(subseq_val_idx), "fold"] = fold_id
+            if show_fold_info:
+                print(f"fold {fold_id} : {subseq_val_idx.values}")
 
     df["fold"] = df["fold"].astype(int)
 
